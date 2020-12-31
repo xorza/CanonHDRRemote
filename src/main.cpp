@@ -1,7 +1,6 @@
 #include <Arduino.h>
-
-#include <vector.h>
 #include <cycle_array.h>
+#include <vector.h>
 
 constexpr int8_t shutterPin = 2;
 constexpr int8_t focusPin = 3;
@@ -12,210 +11,223 @@ constexpr int8_t shutterLedPin = 13;
 
 constexpr int32_t delayBetweenShotsMs = 1000;
 
-bool isStarted = false;
+enum class State : uint8_t {
+    NotInitialized,
+    Idle,
+    ShutterForced,
+    TimerWorking
+};
 
-struct Timestamp final
-{
-  uint32_t endTime = 0;
-  bool shutterOpen = false;
+State state = State::NotInitialized;
 
-  Timestamp() = default;
-  Timestamp(const uint32_t endTimeArg, const bool shutterOpenArg)
-      : endTime(endTimeArg),
-        shutterOpen(shutterOpenArg)
-  {
-  }
+struct Timestamp final {
+    uint32_t endTime = 0;
+    bool shutterOpen = false;
+
+    Timestamp() = default;
+    Timestamp(const uint32_t endTimeArg, const bool shutterOpenArg)
+        : endTime(endTimeArg), shutterOpen(shutterOpenArg) {}
 };
 
 constexpr int8_t TimestampsMaxCount = 100;
 uint32_t cycleStartTime = 0;
 csso::array<Timestamp, TimestampsMaxCount> timestamps;
 
-bool shutterWasOpen = false;
-
 uint32_t currentTime = 0;
-
-uint32_t lastShutterChangedTime = 0;
-
-void shutter(const bool isOpen)
-{
-  if (isOpen != shutterWasOpen)
-  {
-    digitalWrite(shutterPin, isOpen == false);
-    digitalWrite(shutterLedPin, isOpen == false);
-
-    Serial.print((currentTime - lastShutterChangedTime) / 1000);
-    lastShutterChangedTime = currentTime;
-
-    Serial.print(" ");
-    if (isOpen)
-    {
-      Serial.println("open shutter");
-    }
-    else
-    {
-      Serial.println("close shutter");
-    }
-  }
-
-  shutterWasOpen = isOpen;
-}
-
-void addTimestamp(const Timestamp &timestamp)
-{
-  uint32_t lastTimestampTime = 0;
-  if (timestamps.count() > 0)
-  {
-    lastTimestampTime = timestamps.last().endTime;
-  }
-
-  timestamps.push_back(Timestamp{
-      lastTimestampTime + timestamp.endTime,
-      timestamp.shutterOpen});
-}
-
-bool shoudOpenShutter()
-{
-  const uint32_t cycleTime = currentTime - cycleStartTime;
-
-  for (int32_t i = 0; i < timestamps.count(); i++)
-  {
-    if (cycleTime < timestamps[i].endTime)
-    {
-      return timestamps[i].shutterOpen;
-    }
-  }
-
-  cycleStartTime += timestamps.last().endTime;
-
-  return shoudOpenShutter();
-}
-
-void startStop(const bool onlyStop = false)
-{
-  const bool wasStarted = isStarted;
-  isStarted = !(isStarted || onlyStop);
-
-  if (wasStarted == isStarted)
-  {
-    return;
-  }
-
-  digitalWrite(startedLedPin, !isStarted);
-
-  if (isStarted)
-  {
-    cycleStartTime = currentTime;
-
-    Serial.println("Starting");
-  }
-  else
-  {
-    Serial.println("Stopping");
-  }
-}
 
 bool startButtonDown = false;
 bool shutterButtonDown = false;
-bool startButtonWasDown = false;
-bool shutterButtonWasDown = false;
+bool startButtonPressed = false;
 
-const uint16_t filterSize = 20;
-csso::cycle_array<bool, filterSize> startButtonDownArray(false);
-csso::cycle_array<bool, filterSize> shutterButtonDownArray(false);
+void shutter(const bool isOpen) {
+    static bool shutterWasOpen = false;
+    static uint32_t lastShutterChangedTime = 0;
 
-void filterState(const csso::cycle_array<bool, filterSize> &arr, bool &value)
-{
-  uint16_t count = 0;
-  for (uint16_t i = 0; i < arr.count(); ++i)
-  {
-    if (arr[i])
-    {
-      ++count;
+    if (isOpen != shutterWasOpen) {
+        digitalWrite(shutterPin, isOpen == false);
+        digitalWrite(shutterLedPin, isOpen == false);
+
+        Serial.print((currentTime - lastShutterChangedTime) / 1000);
+        lastShutterChangedTime = currentTime;
+
+        Serial.print(" ");
+        if (isOpen) {
+            Serial.println("open shutter");
+        } else {
+            Serial.println("close shutter");
+        }
     }
-  }
 
-  if (count < 5)
-  {
-    value = false;
-  }
-  if (count > filterSize - 5)
-  {
-    value = true;
-  }
+    shutterWasOpen = isOpen;
 }
 
-void updateButtons()
-{
-  const bool isStartButtonDown = digitalRead(startButtonPin);
-  const bool isShutterButtonDown = digitalRead(shutterButtonPin);
+void addTimestamp(const Timestamp &timestamp) {
+    uint32_t lastTimestampTime = 0;
+    if (timestamps.count() > 0) {
+        lastTimestampTime = timestamps.last().endTime;
+    }
 
-  startButtonDownArray.push(isStartButtonDown);
-  shutterButtonDownArray.push(isShutterButtonDown);
-
-  filterState(startButtonDownArray, startButtonDown);
-  filterState(shutterButtonDownArray, shutterButtonDown);
+    timestamps.push_back(Timestamp{lastTimestampTime + timestamp.endTime,
+                                   timestamp.shutterOpen});
 }
 
-void setup()
-{
-  currentTime = millis();
+bool shoudOpenShutter() {
+    const uint32_t cycleTime = currentTime - cycleStartTime;
 
-  pinMode(shutterPin, OUTPUT);
-  pinMode(focusPin, OUTPUT);
+    for (int32_t i = 0; i < timestamps.count(); i++) {
+        if (cycleTime < timestamps[i].endTime) {
+            return timestamps[i].shutterOpen;
+        }
+    }
 
-  pinMode(startedLedPin, OUTPUT);
-  pinMode(shutterLedPin, OUTPUT);
+    cycleStartTime += timestamps.last().endTime;
 
-  pinMode(shutterButtonPin, INPUT);
-  pinMode(startButtonPin, INPUT);
-
-  digitalWrite(shutterLedPin, HIGH);
-  digitalWrite(startedLedPin, HIGH);
-  digitalWrite(focusPin, HIGH);
-  shutter(false);
-
-  addTimestamp({delayBetweenShotsMs, false});
-  addTimestamp({2 * 1000, true});
-  addTimestamp({delayBetweenShotsMs, false});
-  addTimestamp({4 * 1000, true});
-  addTimestamp({delayBetweenShotsMs, false});
-  addTimestamp({6 * 1000, true});
-
-  Serial.begin(9600);
-  Serial.println("op!");
-
-  startStop(true);
+    return shoudOpenShutter();
 }
 
-void loop()
-{
-  updateButtons();
+constexpr uint16_t filterSize = 20;
 
-  const bool isStartButtonPressed = startButtonDown && !startButtonWasDown;
-  startButtonWasDown = startButtonDown;
-  currentTime = millis();
+void filterState(const csso::cycle_array<bool, filterSize> &arr, bool &value) {
+    uint16_t count = 0;
+    for (uint16_t i = 0; i < arr.count(); ++i) {
+        if (arr[i]) {
+            ++count;
+        }
+    }
 
-  if (shutterButtonDown)
-  {
-    startStop(true);
-    shutter(true);
-    return;
-  }
+    if (count < 5) {
+        value = false;
+    }
+    if (count > filterSize - 5) {
+        value = true;
+    }
+}
 
-  if (isStartButtonPressed)
-  {
-    Serial.println("StartButtonPressed");
+void updateButtons() {
+    static bool startButtonWasDown = false;
+    // static bool shutterButtonWasDown = false;
 
-    startStop();
-  }
+    static csso::cycle_array<bool, filterSize> startButtonDownArray(false);
+    static csso::cycle_array<bool, filterSize> shutterButtonDownArray(false);
 
-  if (!isStarted)
-  {
+    const bool isStartButtonDown = digitalRead(startButtonPin);
+    const bool isShutterButtonDown = digitalRead(shutterButtonPin);
+
+    startButtonDownArray.push(isStartButtonDown);
+    shutterButtonDownArray.push(isShutterButtonDown);
+
+    filterState(startButtonDownArray, startButtonDown);
+    filterState(shutterButtonDownArray, shutterButtonDown);
+
+    startButtonPressed = startButtonDown && !startButtonWasDown;
+    startButtonWasDown = startButtonDown;
+}
+
+void applyState(const State state) {
+    switch (state) {
+        case State::Idle:
+            shutter(false);
+            digitalWrite(startedLedPin, HIGH);
+            return;
+
+        case State::ShutterForced:
+            shutter(true);
+            digitalWrite(startedLedPin, HIGH);
+            return;
+
+        case State::TimerWorking:
+            shutter(shoudOpenShutter());
+            digitalWrite(startedLedPin, LOW);
+            return;
+
+        default:
+            Serial.print("Unknown state: ");
+            Serial.println(static_cast<uint8_t>(state));
+            return;
+    }
+}
+
+void changeState(const State newState) {
+    if (state == newState) {
+        Serial.println("ERROR: state == newState");
+        return;
+    }
+
+    state = newState;
+    cycleStartTime = currentTime;
+
+    applyState(state);
+
+    delay(100);
+
+    Serial.print("Changed state to: ");
+    Serial.println(static_cast<uint8_t>(state));
+}
+
+void setup() {
+    currentTime = millis();
+
+    pinMode(shutterPin, OUTPUT);
+    pinMode(focusPin, OUTPUT);
+
+    pinMode(startedLedPin, OUTPUT);
+    pinMode(shutterLedPin, OUTPUT);
+
+    pinMode(shutterButtonPin, INPUT);
+    pinMode(startButtonPin, INPUT);
+
+    digitalWrite(shutterLedPin, HIGH);
+    digitalWrite(startedLedPin, HIGH);
+    digitalWrite(focusPin, HIGH);
     shutter(false);
-    return;
-  }
 
-  const bool isShutterOpen = shoudOpenShutter();
-  shutter(isShutterOpen);
+    addTimestamp({delayBetweenShotsMs, false});
+    addTimestamp({1 * 1000, true});
+    addTimestamp({delayBetweenShotsMs, false});
+    addTimestamp({2 * 1000, true});
+    addTimestamp({delayBetweenShotsMs, false});
+    addTimestamp({3 * 1000, true});
+
+    Serial.begin(9600);
+    Serial.println("op!");
+
+    changeState(State::Idle);
+}
+
+void loop() {
+    updateButtons();
+
+    currentTime = millis();
+
+    applyState(state);
+
+    switch (state) {
+        case State::Idle:
+            if (shutterButtonDown) {
+                changeState(State::ShutterForced);
+            } else if (startButtonPressed) {
+                changeState(State::TimerWorking);
+            }
+            return;
+
+        case State::ShutterForced:
+            if (!shutterButtonDown) {
+                changeState(State::Idle);
+            }
+            return;
+
+        case State::TimerWorking:
+            if (shutterButtonDown) {
+                changeState(State::ShutterForced);
+            } else if (startButtonPressed) {
+                changeState(State::Idle);
+            }
+
+            return;
+
+        default:
+            Serial.print("Unknown state: ");
+            Serial.println(static_cast<uint8_t>(state));
+            return;
+    }
 }
