@@ -40,13 +40,12 @@ bool shutterButtonDown = false;
 bool startButtonPressed = false;
 
 void shutter(const bool isOpen) {
+    digitalWrite(shutterPin, isOpen == false);
+    digitalWrite(shutterLedPin, isOpen == false);
+
     static bool shutterWasOpen = false;
-    static uint32_t lastShutterChangedTime = 0;
-
     if (isOpen != shutterWasOpen) {
-        digitalWrite(shutterPin, isOpen == false);
-        digitalWrite(shutterLedPin, isOpen == false);
-
+        static uint32_t lastShutterChangedTime = 0;
         Serial.print((currentTime - lastShutterChangedTime) / 1000);
         lastShutterChangedTime = currentTime;
 
@@ -57,7 +56,6 @@ void shutter(const bool isOpen) {
             Serial.println("close shutter");
         }
     }
-
     shutterWasOpen = isOpen;
 }
 
@@ -123,7 +121,7 @@ void updateButtons() {
     startButtonWasDown = startButtonDown;
 }
 
-void applyState(const State state) {
+void applyState() {
     switch (state) {
         case State::Idle:
             shutter(false);
@@ -141,14 +139,14 @@ void applyState(const State state) {
             return;
 
         default:
-            Serial.print("Unknown state: ");
-            Serial.println(static_cast<uint8_t>(state));
+            shutter(false);
+            digitalWrite(startedLedPin, HIGH);
             return;
     }
 }
 
-void changeState(const State newState) {
-    if (state == newState) {
+void changeState(const State newState, const bool force = false) {
+    if (state == newState && !force) {
         Serial.println("ERROR: state == newState");
         return;
     }
@@ -156,9 +154,9 @@ void changeState(const State newState) {
     state = newState;
     cycleStartTime = currentTime;
 
-    applyState(state);
+    applyState();
 
-    delay(100);
+    delay(150);
 
     Serial.print("Changed state to: ");
     Serial.println(static_cast<uint8_t>(state));
@@ -176,10 +174,9 @@ void setup() {
     pinMode(shutterButtonPin, INPUT);
     pinMode(startButtonPin, INPUT);
 
-    digitalWrite(shutterLedPin, HIGH);
-    digitalWrite(startedLedPin, HIGH);
     digitalWrite(focusPin, HIGH);
-    shutter(false);
+
+    changeState(State::Idle, true);
 
     addTimestamp({delayBetweenShotsMs, false});
     addTimestamp({1 * 1000, true});
@@ -190,16 +187,13 @@ void setup() {
 
     Serial.begin(9600);
     Serial.println("op!");
-
-    changeState(State::Idle);
 }
 
 void loop() {
-    updateButtons();
-
     currentTime = millis();
 
-    applyState(state);
+    updateButtons();
+    applyState();
 
     switch (state) {
         case State::Idle:
