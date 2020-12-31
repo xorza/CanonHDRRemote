@@ -9,8 +9,6 @@ constexpr int8_t startButtonPin = 5;
 constexpr int8_t startedLedPin = 11;
 constexpr int8_t shutterLedPin = 13;
 
-constexpr int32_t delayBetweenShotsMs = 1000;
-
 enum class State : uint8_t {
     NotInitialized,
     Idle,
@@ -59,14 +57,14 @@ void shutter(const bool isOpen) {
     shutterWasOpen = isOpen;
 }
 
-void addTimestamp(const Timestamp &timestamp) {
+void addTimestamp(const uint32_t timespanS, const bool shutterValue) {
     uint32_t lastTimestampTime = 0;
     if (timestamps.count() > 0) {
         lastTimestampTime = timestamps.last().endTime;
     }
 
-    timestamps.push_back(Timestamp{lastTimestampTime + timestamp.endTime,
-                                   timestamp.shutterOpen});
+    timestamps.push_back(
+        Timestamp{lastTimestampTime + timespanS * 1000, shutterValue});
 }
 
 bool shoudOpenShutter() {
@@ -178,12 +176,13 @@ void setup() {
 
     changeState(State::Idle, true);
 
-    addTimestamp({delayBetweenShotsMs, false});
-    addTimestamp({1 * 1000, true});
-    addTimestamp({delayBetweenShotsMs, false});
-    addTimestamp({2 * 1000, true});
-    addTimestamp({delayBetweenShotsMs, false});
-    addTimestamp({3 * 1000, true});
+    constexpr uint32_t delayBetweenShots = 1;
+    addTimestamp(delayBetweenShots, false);
+    addTimestamp(1, true);
+    addTimestamp(delayBetweenShots, false);
+    addTimestamp(2, true);
+    addTimestamp(delayBetweenShots, false);
+    addTimestamp(3, true);
 
     Serial.begin(9600);
     Serial.println("op!");
