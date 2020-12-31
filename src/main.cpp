@@ -6,7 +6,9 @@ constexpr int8_t shutterPin = 2;
 constexpr int8_t focusPin = 3;
 constexpr int8_t shutterButtonPin = 4;
 constexpr int8_t startButtonPin = 5;
+
 constexpr int8_t startedLedPin = 11;
+constexpr int8_t idleLedPin = 12;
 constexpr int8_t shutterLedPin = 13;
 
 enum class State : uint8_t {
@@ -123,21 +125,25 @@ void applyState() {
     switch (state) {
         case State::Idle:
             shutter(false);
+            digitalWrite(idleLedPin, LOW);
             digitalWrite(startedLedPin, HIGH);
             return;
 
         case State::ShutterForced:
             shutter(true);
+            digitalWrite(idleLedPin, HIGH);
             digitalWrite(startedLedPin, HIGH);
             return;
 
         case State::TimerWorking:
             shutter(shoudOpenShutter());
+            digitalWrite(idleLedPin, HIGH);
             digitalWrite(startedLedPin, LOW);
             return;
 
         default:
             shutter(false);
+            digitalWrite(idleLedPin, HIGH);
             digitalWrite(startedLedPin, HIGH);
             return;
     }
@@ -168,6 +174,7 @@ void setup() {
 
     pinMode(startedLedPin, OUTPUT);
     pinMode(shutterLedPin, OUTPUT);
+    pinMode(idleLedPin, OUTPUT);
 
     pinMode(shutterButtonPin, INPUT);
     pinMode(startButtonPin, INPUT);
